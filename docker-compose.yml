@@ -1,0 +1,18 @@
+services:
+  warehouse:
+    image: postgres:17
+    container_name: fpl-warehouse
+    env_file: .env
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - warehouse_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  warehouse_data:
