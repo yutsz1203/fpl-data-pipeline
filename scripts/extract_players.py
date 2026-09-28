@@ -8,8 +8,10 @@ from pathlib import Path
 
 import aiohttp
 from config import CONCURRENCY, DATA_DIR, PLAYER_URL, TIMEOUT, USER_AGENT
+from db import connect
 from extract_sync import parse_run_date
 from http_client_async import get_json_async
+from run_log import track_run
 
 PROGRESS_EVERY = 50
 
@@ -75,18 +77,21 @@ def write_failed_log(run_date: date, failures) -> Path:
 
 def main():
     run_date = parse_run_date("Extract from Players API.")
-    ids = load_player_ids(run_date)
-    players_dir = reset_players_dir(run_date)
-    t1 = time.perf_counter()
-    failures = asyncio.run(extract_players(ids, players_dir))
-    t2 = time.perf_counter()
-    log_path = write_failed_log(run_date, failures)
-    print(
-        f"Players API fetching summary: saved {len(ids)-len(failures)}/{len(ids)} players, "
-        f"{len(failures)} failed, {t2-t1:.1f} s."
-    )
-    if failures:
-        raise SystemExit(f"{len(failures)} players failed, see {log_path}.")
+    with connect() as conn, track_run(conn, run_date, "extract_players") as run:
+        ids = load_player_ids(run_date)
+        players_dir = reset_players_dir(run_date)
+        t1 = time.perf_counter()
+        failures = asyncio.run(extract_players(ids, players_dir))
+        t2 = time.perf_counter()
+        log_path = write_failed_log(run_date, failures)
+        run.rows_loaded = len(ids) - len(failures)
+        run.failed_ids = sorted(pid for pid, _ in failures)
+        print(
+            f"Players API fetching summary: saved {len(ids)-len(failures)}/{len(ids)} players, "
+            f"{len(failures)} failed, {t2-t1:.1f} s."
+        )
+        if failures:
+            raise SystemExit(f"{len(failures)} players failed, see {log_path}.")
 
 
 if __name__ == "__main__":

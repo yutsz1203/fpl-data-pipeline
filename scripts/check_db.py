@@ -1,19 +1,8 @@
 """Check that Python can connect to the warehouse and that the raw schema exists."""
 
-import os
+from db import connect
 
-import psycopg
-from dotenv import load_dotenv
-
-load_dotenv()
-
-conninfo = (
-    f"host={os.environ['POSTGRES_HOST']} port={os.environ['POSTGRES_PORT']} "
-    f"dbname={os.environ['POSTGRES_DB']} user={os.environ['POSTGRES_USER']} "
-    f"password={os.environ['POSTGRES_PASSWORD']}"
-)
-
-with psycopg.connect(conninfo) as conn:
+with connect() as conn:
     version = conn.execute("select version()").fetchone()[0]
     schemas = [
         row[0]
