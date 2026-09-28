@@ -4,3 +4,6 @@ data/
 __pycache__/
 .ipynb_checkpoints/
 docs/
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
