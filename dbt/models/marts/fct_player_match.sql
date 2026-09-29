@@ -12,7 +12,6 @@ with matches as (
         on p.season = m.season and m.player_id = p.player_id
     left join {{ ref('stg_gameweeks') }} as g
         on g.season = m.season and m.gameweek_id = g.gameweek_id
-
 )
 
 select
@@ -44,6 +43,11 @@ select
     recoveries,
     tackles,
     defensive_contribution,
+    case
+        when position_id = 2 and defensive_contribution >= 10 then 2
+        when position_id in (3,4) and defensive_contribution >= 12 then 2
+        else 0
+    end as defcon_points,
     influence,
     creativity,
     threat,

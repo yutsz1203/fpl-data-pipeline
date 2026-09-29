@@ -1,0 +1,168 @@
+models:
+  - name: dim_team
+    description: One row per team per season.
+    data_tests:
+      - rows_per_season:
+          arguments:
+            expected: 20
+    columns:
+      - name: team_key
+        data_tests:
+          - unique
+          - not_null
+  - name: dim_player
+    description: One row per player per season, as of the newest master snapshot.
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+      - name: current_price
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 20
+                inclusive: false
+  - name: dim_position
+    description: One row per position per season.
+    data_tests:
+      - rows_per_season:
+          arguments:
+            expected: 4
+    columns:
+      - name: position_key
+        data_tests:
+          - unique
+          - not_null
+  - name: dim_gameweek
+    description: One row per gameweek per season.
+    data_tests:
+      - rows_per_season:
+          arguments:
+            expected: 38
+    columns:
+      - name: gameweek_key
+        data_tests:
+          - unique
+          - not_null
+  - name: dim_fixture
+    description: One row per fixture per season.
+    data_tests:
+      - rows_per_season:
+          arguments:
+            expected: 380
+    columns:
+      - name: fixture_key
+        data_tests:
+          - unique
+          - not_null
+  - name: fct_player_match
+    description: One row per player per fixture.
+    columns:
+      - name: player_match_key
+        data_tests:
+          - unique
+          - not_null
+      - name: team_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_team')
+                field: team_key
+      - name: player_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_player')
+                field: player_key
+      - name: opponent_team_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_team')
+                field: team_key
+      - name: position_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_position')
+                field: position_key
+      - name: gameweek_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_gameweek')
+                field: gameweek_key
+      - name: fixture_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_fixture')
+                field: fixture_key
+      - name: price
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 20
+                inclusive: false
+      - name: minutes
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+                inclusive: true
+      - name: defcon_points
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 2]
+                quote: false
+  - name: player_form
+    description: One row per fct_player_match row, with rolling 5-match metrics.
+    data_tests:
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('fct_player_match')
+    columns:
+      - name: player_match_key
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_player_match')
+                field: player_match_key
+      - name: matches_in_form
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 5
+  - name: player_season_stats
+    description: One row per player per season in fct_player_match, with season totals and per-90 rates.
+    data_tests:
+      - dbt_utils.equality:
+          arguments:
+            compare_model: ref('fct_player_match')
+            compare_columns: [player_key]
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_player')
+                field: player_key

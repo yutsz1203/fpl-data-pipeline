@@ -12,7 +12,21 @@ sources:
         description: bootstrap-static snapshot. One row per run_date.
       - name: fixtures
         description: fixtures snapshot. One row per run_date.
+        columns:
+          - name: run_date
+            data_tests:
+              - relationships:
+                  arguments:
+                    to: source('raw', 'master')
+                    field: run_date
       - name: player_summary
         description: element-summary per player. One row per (run_date, player_id). Loaded only after a gameweek finishes.
         config:
           freshness: null
+        columns:
+          - name: run_date
+            data_tests:
+              - relationships:
+                  arguments:
+                    to: source('raw', 'master')
+                    field: run_date

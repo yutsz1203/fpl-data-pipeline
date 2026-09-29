@@ -11,6 +11,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "adjusttext>=1.4.0",
     "jupyter>=1.1.1",
+    "matplotlib>=3.11.2",
     "pandas>=3.0.6",
+    "sqlalchemy>=2.1.1",
 ]

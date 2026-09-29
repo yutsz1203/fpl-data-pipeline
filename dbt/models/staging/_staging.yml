@@ -1,0 +1,24 @@
+models:
+  - name: base_snapshot_seasons
+    description: The FPL season of each master snapshot, from the year of gameweek 1's deadline.
+    columns:
+      - name: run_date
+        data_tests:
+          - unique
+          - not_null
+      - name: season
+        data_tests:
+          - not_null
+  - name: stg_teams
+    columns:
+      - name: difficulty_as_host
+        description: Fixture difficulty (1-5) for a team that visits this team.
+      - name: difficulty_as_visitor
+        description: Fixture difficulty (1-5) for a team that hosts this team.
+  - name: stg_player_seasons
+    description: >
+      One row per player (player_code) per past season, from history_past.
+      FPL stores 0 for stats it did not record. First season with real values:
+      bonus 2008/09, bps 2013/14, influence, creativity, threat and ict_index 2016/17,
+      starts and the four expected_* stats 2022/23, defensive_contribution 2024/25,
+      clearances_blocks_interceptions, recoveries and tackles 2025/26.
