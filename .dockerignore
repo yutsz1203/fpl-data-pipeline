@@ -1,0 +1,13 @@
+.git
+.env
+.venv
+data
+docs
+notebooks
+airflow/logs
+dbt/.venv
+dbt/target
+dbt/logs
+dbt/dbt_packages
+**/__pycache__
+**/.DS_Store
