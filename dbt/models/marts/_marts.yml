@@ -166,3 +166,42 @@ models:
               arguments:
                 to: ref('dim_player')
                 field: player_key
+  - name: player_scouting
+    description: One row per player per season, player_season_stats with the player's name, position and latest team. The dashboard's player cards read only this table.
+    data_tests:
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('player_season_stats')
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+      - name: web_name
+        data_tests:
+          - not_null
+      - name: team
+        description: Short name of the team in the player's latest match.
+        data_tests:
+          - not_null
+      - name: position
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['GKP', 'DEF', 'MID', 'FWD']
+  - name: player_scouting_last_n
+    description: One row per player per window of their last N games (N = 1 up to games played this season), with player_scouting's columns summed over that window. The dashboard's "Last N games" filter picks the window.
+    data_tests:
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('fct_player_match')
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [player_key, last_n]
+    columns:
+      - name: last_n
+        description: Number of the player's most recent games in this window, including games they did not play.
+      - name: team
+        data_tests:
+          - not_null
