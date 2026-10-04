@@ -1,16 +1,20 @@
 # FPL Data Pipeline
-A daily ELT pipeline for Fantasy Premier League (FPL) data. Python extracts the FPL API, PostgreSQL stores the raw JSON, dbt builds a tested star schema, Airflow runs it every day, and Metabase shows the results.
+A daily ELT pipeline for Fantasy Premier League (FPL) data. Python extracts the FPL API, PostgreSQL stores the raw JSON, dbt builds a tested star schema, Airflow runs it every day, and Metabase and Tableau show the results.
 
-**Stack:** Python, PostgreSQL, dbt Core, Apache Airflow, Metabase, Docker. 
+**Stack:** Python, PostgreSQL, dbt Core, Apache Airflow, Metabase, Tableau, Google Sheets API, Docker. 
 
 ![FPL scouting dashboard](images/dashboard.png)
+![FPL scouting on Tableau Public](images/tableau.png)
+**Live dashboard:** [FPL scouting on Tableau](https://public.tableau.com/app/profile/tsz.hin.mervin.yu/viz/FPLScouting/Season), updated daily.
 
 ## What it does
 
 - Every day at 08:00 HKT, it saves the FPL master file (players, teams, gameweeks) and the fixtures as JSON, and loads them into Postgres as JSONB.
-- After each gameweek, it also saves every player's match history, then rebuilds the dbt models and runs tests.
+- After each gameweek, it also saves every player's match history.
+- Every day, dbt rebuilds the models from the latest files and runs the tests, so prices and player status are never more than a day old.
 - dbt builds 5 dimensions and 1 fact table (one row per player per fixture), plus 4 analysis tables.
-- A script builds two Metabase dashboards: **FPL scouting** (season to date) and **FPL form** (each player's last N games, with N as a filter, default 5).
+- A script builds two Metabase dashboards: **FPL scouting** (season to date) and **FPL form** (each player's last N games, default 5).
+- After the tests pass, it writes the current season's scouting tables to a Google Sheet. Tableau re-reads the sheet every day for two public dashboards: **Season** and **Form**.
 
 ## Pipeline
 
@@ -23,6 +27,7 @@ flowchart LR
     raw --> staging[dbt staging<br/>views]
     staging --> marts[(dbt marts<br/>star schema)]
     marts --> metabase[Metabase]
+    marts --> export[Export<br/>Python] --> sheet[(Google Sheet)] --> tableau[Tableau]
     raw -. pipeline_runs .-> metabase
     airflow[Airflow] -. runs daily .-> extract
 ```
@@ -35,12 +40,14 @@ flowchart LR
     ef[extract_fixtures] --> lf[load_fixtures]
     lm --> gate{new gameweek<br/>finished?}
     lf --> gate
-    gate -- yes --> ep[extract_players] --> lp[load_players] --> run[dbt run] --> test[dbt test]
-    gate -- no --> stop([stop])
+    gate -- yes --> ep[extract_players] --> lp[load_players] --> run[dbt run] --> test[dbt test] --> exp[export_sheets]
+    gate -- no --> run
 ```
 
 - Master and fixtures load every day, so the warehouse keeps a daily snapshot of prices and player status.
-- The gate compares the newest finished gameweek in today's master file with the one at the last player load. Player histories only change after a gameweek, so on other days the player calls and dbt are skipped.
+- The gate compares the newest finished gameweek in today's master file with the one at the last player load. Player histories only change after a gameweek, so on other days the player calls are skipped.
+- dbt runs every day either way (trigger rule `none_failed`), so current prices and player status come from today's master file.
+- `export_sheets` exits with code 99 when `GOOGLE_SHEET_ID` is empty, and Airflow marks it skipped. The pipeline works without a Google account.
 
 ## Data model
 
@@ -124,7 +131,7 @@ This project requires Docker, [uv](https://docs.astral.sh/uv/) and git.
 2. Build the Airflow image, then start the stack:
 
    ```bash
-   mkdir -p airflow/logs data
+   mkdir -p airflow/logs data secrets
    docker compose build airflow-init
    docker compose up -d --wait
    ```
@@ -148,7 +155,12 @@ This project requires Docker, [uv](https://docs.astral.sh/uv/) and git.
 
    Open http://localhost:3000 and log in with `METABASE_ADMIN_EMAIL` and `METABASE_ADMIN_PASSWORD` from `.env`.
 
-
+5. Optional: the Google Sheet for Tableau.
+   1. In Google Cloud, create a project, enable the Google Sheets API, and create a service account with no roles. Create a JSON key and save it as `secrets/google-service-account.json`.
+   2. Create a Google Sheet with two tabs, `season` and `last_n`, and share it with the service account's email as Editor.
+   3. Set `GOOGLE_SHEET_ID` in `.env` to the part of the sheet's URL between `/d/` and `/edit`, then run `docker compose up -d`.
+   4. In Tableau Public, connect to the sheet through Google Drive. Add your Google account under saved credentials in your Tableau Public settings, then publish with "Keep my data in sync".
+   
 ## Day to day
 
 - `docker compose stop` and `docker compose up -d` keep all data. Do not run `docker compose down -v`: it deletes the warehouse and the Metabase database.
@@ -157,16 +169,18 @@ This project requires Docker, [uv](https://docs.astral.sh/uv/) and git.
 - You can rerun `metabase/provision.py` at any time. It updates the cards and dashboards in place and overwrites changes made in the Metabase UI.
 - To run dbt from your machine: `cd dbt`, then `uv run dbt deps` once, then `uv run dbt build`. The warehouse is on `localhost:5433`.
 - Notebooks: `uv run jupyter lab notebooks/`.
+- The export overwrites both tabs of the Google Sheet every day, so don't edit the sheet by hand. For a refresh sooner than Tableau Public's daily one, click **Request Update** on the viz page.
 
 ## Project layout
 ```
 fpl-data-pipeline/
 ├── airflow/                  # Dockerfile and the DAG (dags/fpl_daily.py)
 ├── dbt/                      # dbt project with its own uv environment: staging, marts, tests
-├── images/                   # README screenshot
+├── images/                   # README screenshots
 ├── metabase/                 # provision.py: the dashboards as code
 ├── notebooks/                # API exploration and the top-players analysis
-├── scripts/                  # extract and load scripts, run log
+├── scripts/                  # extract, load and Google Sheets export scripts, run log
+├── secrets/                  # Google service account key (git-ignored, optional)
 └── sql/                      # schemas, raw tables and the read-only Metabase role
 ```
 

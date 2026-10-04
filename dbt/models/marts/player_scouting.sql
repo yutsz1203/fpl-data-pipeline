@@ -8,11 +8,21 @@ with latest_team as (
         on x.fixture_key = f.fixture_key
     order by f.player_key, x.kickoff_time desc
 
+),
+gameweeks as (
+
+    select
+        season,
+        count(*) filter (where is_finished and is_data_checked) as finished_gameweeks
+    from {{ ref('dim_gameweek') }}
+    group by season
+
 )
 
 select
     s.player_key,
     s.season,
+    g.finished_gameweeks,
     p.web_name,
     t.team_short_name as team,
     pos.position_name as position,
@@ -41,3 +51,5 @@ left join latest_team as lt
     on lt.player_key = s.player_key
 left join {{ ref('dim_team') }} as t
     on t.team_key = lt.team_key
+left join gameweeks as g
+    on g.season = s.season

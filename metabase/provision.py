@@ -33,8 +33,7 @@ LAST_N_FILTER = {
 SEASON = {
     "table": "marts.player_scouting",
     "window": [],
-    "n": "(select count(*) from marts.dim_gameweek as g "
-    "where g.season = player_scouting.season and g.is_finished)",
+    "n": "finished_gameweeks",
     "suffix": "",
     "about": f"Season to date. Tables: top 20 with {MINUTES_PER_GAME}+ minutes "
     "per finished gameweek.",

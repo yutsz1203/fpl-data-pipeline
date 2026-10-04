@@ -11,3 +11,4 @@ dbt/logs
 dbt/dbt_packages
 **/__pycache__
 **/.DS_Store
+secrets/

@@ -5,7 +5,7 @@ from pathlib import Path
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import ShortCircuitOperator
-from airflow.sdk import DAG, CronTriggerTimetable
+from airflow.sdk import DAG, CronTriggerTimetable, TriggerRule
 
 FPL_HOME = "/opt/fpl"
 RUN_DATE = "{{ dag_run.run_after | ds }}"
@@ -78,6 +78,7 @@ with DAG(
         task_id="gate",
         python_callable=new_gameweek_finished,
         op_kwargs={"run_date": RUN_DATE},
+        ignore_downstream_trigger_rules=False,
     )
 
     extract_players = fpl_script("extract_players", "extract_players.py")
@@ -86,6 +87,7 @@ with DAG(
         task_id="dbt_run",
         bash_command=".venv/bin/dbt run",
         cwd=f"{FPL_HOME}/dbt",
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
     dbt_test = BashOperator(
         task_id="dbt_test",
@@ -93,7 +95,7 @@ with DAG(
         cwd=f"{FPL_HOME}/dbt",
         retries=0,
     )
-
+    export_sheets = fpl_script("export_sheets", "export_sheets.py")
     extract_master >> load_master
     extract_fixtures >> load_fixtures
     (
@@ -103,4 +105,5 @@ with DAG(
         >> load_players
         >> dbt_run
         >> dbt_test
+        >> export_sheets
     )
