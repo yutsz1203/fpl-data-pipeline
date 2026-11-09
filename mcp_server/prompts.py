@@ -21,6 +21,9 @@ WINDOW_NOTE = (
 )
 
 
+FORECAST_NOTE = "If fixture_outlook's forecast_note is not empty, say what it says and lean on difficulty."
+
+
 def prompt_arg(name: str, kind: Any, value: str) -> Any:
     try:
         return TypeAdapter(kind).validate_python(value)
@@ -57,13 +60,16 @@ def scout_position(
     position = prompt_arg("position", Position, position)
     budget = prompt_arg("budget", Budget, budget)
     compare = with_core(parse_metrics(metrics) or POSITION_METRICS[position])
+    outlook = "expected_clean_sheets" if position in ("GKP", "DEF") else "expected_gf"
     return f"""Scout {POSITION_NAMES[position]} at or under £{budget:.1f}m for my FPL team.
 
 1. Call top_players with position={position}, metric=total_points and max_price={budget}, for the whole season.
 2. Call top_players again with the same arguments and last_n=5.
 3. Take the top 3 players from step 2. For each one, call player_season, and player_form with last_n=5.
-4. Compare them on these metrics: {compare}. Make two short tables, one for the season and one for the last 5 games, with name, team and price in each. {WINDOW_NOTE}
-5. Recommend one player in two sentences, and name the numbers that decide it.
+4. Call fixture_outlook once for each of their teams, with gameweeks=5.
+5. Compare them on these metrics: {compare}. Make two short tables, one for the season and one for the last 5 games, with name, team and price in each. {WINDOW_NOTE}
+6. Make a third table for the next 5 gameweeks: opponents, average difficulty, and the team's {outlook}. Mark blank and double gameweeks. {FORECAST_NOTE}
+7. Recommend one player in two sentences, and name the numbers that decide it: form and fixtures both count.
 
 Use only the numbers that the tools return. Say which gameweek the data runs to."""
 
@@ -94,9 +100,10 @@ def transfer_check(
     return f"""I am thinking of selling {player_out} and buying {player_in} in FPL.
 
 1. Call search_players for each name. If a name matches more than one player, show me the matches with team and position, and ask which one I mean. Do not guess.
-2. Call player_season and player_form (last_n=5) for both players.
+2. Call player_season and player_form (last_n=5) for both players, and fixture_outlook (gameweeks=5) for each player's team.
 3. If they play different positions, say so first: an FPL transfer must replace a player with one in the same position.
 4. {compare} Make two short tables, one for the season and one for the last 5 games, with price in each. {WINDOW_NOTE}
-5. Recommend: make the transfer, or keep {player_out}. Give the two or three numbers that decide it.
+5. Make a third table for the next 5 gameweeks: opponents, average difficulty, expected goals for (for attacking players) or expected clean sheets (for goalkeepers and defenders). Mark blank and double gameweeks. {FORECAST_NOTE}
+6. Recommend: make the transfer, or keep {player_out}. Give the two or three numbers that decide it: form and fixtures both count.
 
 Use only the numbers that the tools return. Say which gameweek the data runs to."""

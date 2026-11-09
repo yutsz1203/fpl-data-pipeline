@@ -142,3 +142,59 @@ class Freshness(BaseModel):
         description="Latest gameweek that is finished and data-checked."
     )
     steps: list[StepFreshness]
+
+
+class OutlookFixture(BaseModel):
+    gameweek: int
+    kickoff_time: datetime
+    opponent: str
+    home: bool
+    difficulty: int = Field(description="FPL fixture difficulty, 1 (easiest) to 5.")
+    expected_gf: float | None = Field(
+        description="Forecast goals for. Empty if no forecast."
+    )
+    expected_ga: float | None = Field(
+        description="Forecast goals against. Empty if no forecast."
+    )
+    clean_sheet_probability: float | None = Field(
+        description="Chance of conceding no goal: exp(-expected_ga)."
+    )
+
+
+class TeamOutlook(BaseModel):
+    rank: int
+    team: str
+    fixture_count: int
+    blank_gameweeks: list[int] = Field(description="Gameweeks with no fixture.")
+    double_gameweeks: list[int] = Field(
+        description="Gameweeks with 2 or more fixtures."
+    )
+    average_difficulty: float | None
+    expected_gf: float | None = Field(
+        description="Sum over the fixtures that have a forecast."
+    )
+    expected_ga: float | None
+    expected_clean_sheets: float | None = Field(
+        description="Sum of the clean sheet probabilities."
+    )
+    fixtures_without_forecast: int
+    opponents: list[str] = Field(
+        description="One per fixture, in kickoff order: gameweek, opponent, H or A, FPL difficulty."
+    )
+    fixtures: list[OutlookFixture] = Field(
+        description="Each fixture with its forecast. Only when a team is given."
+    )
+
+
+class FixtureOutlookResult(BaseModel):
+    season: str
+    data_to_gameweek: int | None
+    from_gameweek: int
+    to_gameweek: int
+    sort_by: str
+    forecast_gameweeks: str | None = Field(
+        description="The gameweeks the forecast covers, for example '11-15'."
+    )
+    forecast_updated_at: datetime | None
+    forecast_note: str = Field(description="Empty when the forecast is fresh.")
+    teams: list[TeamOutlook]

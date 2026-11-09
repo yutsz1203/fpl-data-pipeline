@@ -6,6 +6,7 @@ from pydantic import Field, StringConstraints
 SEARCH_CAP = 10
 TOP_CAP = 25
 FORM_CAP = 10
+OUTLOOK_CAP = 8
 MIN_PRICE = 3.5
 MAX_PRICE = 20.0
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
@@ -32,6 +33,13 @@ PlayerName = Annotated[
     ),
 ]
 Position = Literal["GKP", "DEF", "MID", "FWD"]
+TeamName = Annotated[
+    str | None,
+    Field(
+        pattern=r"^[A-Z]{3}$",
+        description="Team short name, for example 'ARS'. Leave it out for all 20 teams.",
+    ),
+]
 Budget = Annotated[float, Field(ge=MIN_PRICE, le=MAX_PRICE)]
 Metric = Literal[
     "total_points",
@@ -123,7 +131,7 @@ SCHEMA_TABLES = {
     "dim_player": "One row per player per season. player_key is the id the tools use.",
     "dim_team": "One row per team per season.",
     "dim_gameweek": "One row per gameweek. data_to_gameweek is the latest one that is finished and data-checked.",
-    "dim_fixture": "One row per match.",
+    "dim_fixture": "One row per match, played or not, with FPL's difficulty for each side. fixture_outlook reads it.",
     "fct_player_match": "One row per player per match of their team. player_form reads it.",
     "player_season_stats": "Season totals and per-90 rates, one row per player. player_season reads it.",
     "player_scouting": "Season totals with team and position, one row per player. search_players and top_players read it.",
@@ -144,5 +152,9 @@ GLOSSARY = {
     "defcon_per_90": "Defensive contributions per 90 minutes. FPL gives 2 points when a defender reaches 10 in a match, or a midfielder or forward reaches 12.",
     "defcon_hit_rate": "Share of appearances (games with any minutes) that earned those 2 points.",
     "saves": "Goalkeeper saves.",
+    "difficulty": "FPL fixture difficulty for one side, 1 (easiest) to 5.",
+    "expected_gf / expected_ga": "Forecast goals for and against in one fixture, from a Poisson model fitted on this season's results and weighted toward recent games. Use them to compare teams more than as exact numbers.",
+    "clean_sheet_probability": "exp(-expected_ga): the model's chance that the team concedes no goal. Rough, because the model treats both teams' goals as independent.",
+    "blank / double gameweek": "A gameweek in which a team has no fixture, or 2 or more.",
     "minutes floor": "top_players ranks only players with at least 60 minutes per finished gameweek (season) or 60 minutes per game (last_n).",
 }

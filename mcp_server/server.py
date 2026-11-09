@@ -1,9 +1,11 @@
+import math
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated
+from statistics import mean
+from typing import Annotated, Literal
 
 import psycopg
 from dotenv import load_dotenv
@@ -14,14 +16,17 @@ from psycopg.rows import dict_row
 from pydantic import Field
 
 from mcp_server.classes import (
+    FixtureOutlookResult,
     Freshness,
     Game,
+    OutlookFixture,
     Player,
     PlayerFormResult,
     PlayerSeasonResult,
     RankedPlayer,
     SearchResult,
     StepFreshness,
+    TeamOutlook,
     TopPlayersResult,
     WindowTotals,
 )
@@ -31,6 +36,7 @@ from mcp_server.constants import (
     MAX_PRICE,
     METRICS,
     MIN_PRICE,
+    OUTLOOK_CAP,
     READ_ONLY,
     SCHEMA_TABLES,
     SEARCH_CAP,
@@ -40,17 +46,22 @@ from mcp_server.constants import (
     PlayerName,
     Position,
     Season,
+    TeamName,
 )
+from mcp_server.forecast import load_forecast
 from mcp_server.prompts import scout_position, transfer_check
 from mcp_server.queries import (
     FIND_PLAYER_SQL,
     FORM_GAMES_SQL,
     FORM_TOTALS_SQL,
     FRESHNESS_SQL,
+    GAMEWEEK_RANGE_SQL,
+    OUTLOOK_SQL,
     SCHEMA_SQL,
     SEARCH_SQL,
     SEASON_SQL,
     SEASONS_SQL,
+    TEAMS_SQL,
     TOP_SQL,
 )
 
@@ -62,6 +73,7 @@ mcp = MCPServer(
     instructions=(
         "Read-only Fantasy Premier League stats from a daily-updated warehouse. "
         "Players are identified by player_key, which search_players returns. "
+        "fixture_outlook looks ahead: upcoming fixtures, FPL difficulty and forecast goals. "
         "Say which gameweek the data runs to (data_to_gameweek) when you answer."
     ),
 )
@@ -301,6 +313,148 @@ def player_season(player_key: PlayerKey) -> PlayerSeasonResult:
     if row is None:
         raise ToolError(f"{player['web_name']} has no games in {player['season']} yet.")
     return PlayerSeasonResult(data_to_gameweek=current["data_to_gameweek"], **row)
+
+
+@mcp.tool(annotations=READ_ONLY)
+def fixture_outlook(
+    gameweeks: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=OUTLOOK_CAP,
+            description="How many gameweeks to look ahead, starting with the next deadline.",
+        ),
+    ] = 5,
+    team: TeamName = None,
+    sort_by: Annotated[
+        Literal["attack", "defence"],
+        Field(
+            description="attack: most forecast goals for first. defence: most expected clean sheets first."
+        ),
+    ] = "attack",
+) -> FixtureOutlookResult:
+    """Each team's upcoming fixtures, with FPL difficulty and forecast goals for and against.
+
+    Use this for "which teams have the best fixtures", "who has a double gameweek",
+    "whose defenders should I buy", or to check a player's next games before a
+    transfer or a captain pick: pass the team from the player's result, for example
+    team="ARS". Fixtures and difficulty come from FPL. Forecast goals and clean sheet
+    probabilities come from a team-strength model, and can be missing or out of date:
+    read forecast_note and say so. Totals add up every fixture in the window, so a
+    double gameweek counts twice. Returns at most 20 teams. The forecast for each
+    fixture is listed only when team is given.
+    """
+    with open_cursor() as cur:
+        current = resolve_season(cur, None)
+        season = current["season"]
+        span = cur.execute(GAMEWEEK_RANGE_SQL, {"season": season}).fetchone()
+        if span["next_gameweek"] is None:
+            raise ToolError(f"Every gameweek deadline in {season} has passed.")
+        start = span["next_gameweek"]
+        end = min(start + gameweeks - 1, span["last_gameweek"])
+        teams = cur.execute(TEAMS_SQL, {"season": season}).fetchall()
+        rows = cur.execute(
+            OUTLOOK_SQL, {"season": season, "from_gameweek": start, "to_gameweek": end}
+        ).fetchall()
+    if team is not None and team not in {t["team"] for t in teams}:
+        names = ", ".join(t["team"] for t in teams)
+        raise ToolError(f"No team {team!r} in {season}. Teams: {names}.")
+
+    forecast = load_forecast()
+    outlooks = []
+    for t in teams:
+        if team is not None and t["team"] != team:
+            continue
+        fixtures = []
+        for row in rows:
+            if row["team_id"] != t["team_id"]:
+                continue
+            key = (row["gameweek"], row["team_id"], row["opponent_id"])
+            gf, ga = forecast.fixtures.get(key, (None, None))
+            fixtures.append(
+                OutlookFixture(
+                    gameweek=row["gameweek"],
+                    kickoff_time=row["kickoff_time"],
+                    opponent=row["opponent"],
+                    home=row["home"],
+                    difficulty=row["difficulty"],
+                    expected_gf=gf,
+                    expected_ga=ga,
+                    clean_sheet_probability=None
+                    if ga is None
+                    else round(math.exp(-ga), 2),
+                )
+            )
+        counts = Counter(f.gameweek for f in fixtures)
+        known = [f for f in fixtures if f.expected_ga is not None]
+        outlooks.append(
+            TeamOutlook(
+                rank=0,
+                team=t["team"],
+                fixture_count=len(fixtures),
+                blank_gameweeks=[gw for gw in range(start, end + 1) if counts[gw] == 0],
+                double_gameweeks=sorted(gw for gw, n in counts.items() if n > 1),
+                average_difficulty=round(mean(f.difficulty for f in fixtures), 2)
+                if fixtures
+                else None,
+                expected_gf=round(sum(f.expected_gf for f in known), 2)
+                if known
+                else None,
+                expected_ga=round(sum(f.expected_ga for f in known), 2)
+                if known
+                else None,
+                expected_clean_sheets=round(
+                    sum(math.exp(-f.expected_ga) for f in known), 2
+                )
+                if known
+                else None,
+                fixtures_without_forecast=len(fixtures) - len(known),
+                opponents=[
+                    f"GW{f.gameweek} {f.opponent} ({'H' if f.home else 'A'}, {f.difficulty})"
+                    for f in fixtures
+                ],
+                fixtures=fixtures if team is not None else [],
+            )
+        )
+
+    score = "expected_gf" if sort_by == "attack" else "expected_clean_sheets"
+    outlooks.sort(
+        key=lambda o: (
+            getattr(o, score) is None,
+            -(getattr(o, score) or 0),
+            o.average_difficulty or 9,
+            o.team,
+        )
+    )
+    for rank, outlook in enumerate(outlooks, start=1):
+        outlook.rank = rank
+
+    notes = [forecast.note] if forecast.note else []
+    if forecast.fixtures:
+        if forecast.first_gameweek < start:
+            notes.append(
+                f"The forecast was made for gameweek {forecast.first_gameweek} onward, "
+                f"before gameweek {start}. Its numbers may be out of date."
+            )
+        missing = sum(o.fixtures_without_forecast for o in outlooks)
+        if missing:
+            notes.append(
+                f"{missing} fixtures have no forecast (the forecast covers gameweeks "
+                f"{forecast.first_gameweek}-{forecast.last_gameweek})."
+            )
+    return FixtureOutlookResult(
+        season=season,
+        data_to_gameweek=current["data_to_gameweek"],
+        from_gameweek=start,
+        to_gameweek=end,
+        sort_by=sort_by,
+        forecast_gameweeks=f"{forecast.first_gameweek}-{forecast.last_gameweek}"
+        if forecast.fixtures
+        else None,
+        forecast_updated_at=forecast.updated_at,
+        forecast_note=" ".join(notes),
+        teams=outlooks,
+    )
 
 
 @mcp.resource("fpl://schema", mime_type="text/markdown", title="Warehouse schema")

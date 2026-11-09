@@ -1,6 +1,6 @@
 # FPL Data Pipeline
 A daily ELT pipeline for Fantasy Premier League (FPL) data. Python extracts the FPL API, PostgreSQL stores the raw JSON, dbt builds a tested star schema, Airflow runs it every day, and Metabase and Tableau show the results.
-A read-only MCP server lets an AI agent such as Claude Code answer FPL questions with the warehouse's numbers, through 4 fixed tools and a database role that can't write.
+A read-only MCP server lets an AI agent such as Claude Code answer FPL questions with the warehouse's numbers, through 5 fixed tools and a database role that can't write.
 
 **Stack:** Python, PostgreSQL, dbt Core, Apache Airflow, Metabase, Tableau, Google Sheets API, Docker. 
 
@@ -184,6 +184,7 @@ flowchart LR
     client -- stdio --> server[mcp_server<br/>Python, mcp SDK]
     server -- SQL as mcp_reader --> marts[(Postgres<br/>marts schema)]
     server -. 4 columns .-> runs[(raw.pipeline_runs)]
+    server -. reads .-> forecast[/fixture_forecast.csv<br/>football-prediction-engine/]
 ```
 
 Claude Code starts the server as a child process and talks to it over stdin and stdout. Nothing listens on a port.
@@ -194,10 +195,11 @@ Claude Code starts the server as a child process and talks to it over stdin and 
 | Tool | `top_players` | Ranks one position by one stat, with an optional price limit, for the season or the last N games |
 | Tool | `player_form` | One player's last N games, game by game, plus totals |
 | Tool | `player_season` | One player's season totals and per-90 rates |
+| Tool | `fixture_outlook` | Each team's next N gameweeks: opponents, FPL difficulty, blank and double gameweeks, and forecast goals for and against and clean sheet chances |
 | Resource | `fpl://schema` | The tables behind the tools, their columns, and a glossary of the stats |
 | Resource | `fpl://freshness` | The latest finished gameweek and the last successful run of each pipeline step |
-| Prompt | `scout_position` | Finds the best players in a position under a budget, by season and last 5 games |
-| Prompt | `transfer_check` | Compares the player you want to sell with the player you want to buy |
+| Prompt | `scout_position` | Finds the best players in a position under a budget, by season, last 5 games and next 5 fixtures |
+| Prompt | `transfer_check` | Compares the player you want to sell with the player you want to buy, including their next 5 fixtures |
 
 Every tool result says which gameweek the data runs to (`data_to_gameweek`).
 
@@ -216,7 +218,9 @@ Every tool result says which gameweek the data runs to (`data_to_gameweek`).
    claude mcp add fpl -- uv run --directory /absolute/path/to/fpl-data-pipeline python -m mcp_server.server
    ```
 
-3. Start Claude Code and run `/mcp`. `fpl` must show as connected, with 4 tools.
+3. Optional: the forecast. `fixture_outlook` always shows fixtures and FPL difficulty. For forecast goals, set `FORECAST_CSV` in `.env` to the `teams/projection/fixture_forecast.csv` file that [football-prediction-engine](https://github.com/yutsz1203/football-prediction-engine) writes each week. Without it, the tool ranks by difficulty and says so.
+
+4. Start Claude Code and run `/mcp`. `fpl` must show as connected, with 5 tools.
 
 To look at the raw requests and results without a model, use the MCP Inspector: `npx @modelcontextprotocol/inspector uv run python -m mcp_server.server`.
 
@@ -227,8 +231,8 @@ To look at the raw requests and results without a model, use the MCP Inspector: 
 uv run pytest
 ```
 
-- `tests/test_validation.py` needs no database. It checks that each bad argument is rejected with a readable reason before any query runs, and that the server lists exactly 4 read-only tools.
-- `tests/test_integration.py` needs the running warehouse and is skipped if it can't connect. It calls each tool, checks the row caps, and checks that `mcp_reader` can't insert and that a 5-second query is cancelled.
+- `tests/test_validation.py` needs no database. It checks that each bad argument is rejected with a readable reason before any query runs, and that the server lists exactly 5 read-only tools.
+- `tests/test_integration.py` needs the running warehouse and is skipped if it can't connect. It calls each tool, checks the row caps and the forecast join, and checks that `mcp_reader` can't insert and that a 5-second query is cancelled.
 
 ## Project layout
 ```

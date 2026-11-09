@@ -1,3 +1,4 @@
+import math
 import time
 
 import psycopg
@@ -84,6 +85,60 @@ async def test_unknown_season_lists_the_seasons(client):
     )
     assert result.is_error is True
     assert "Seasons available:" in result.content[0].text
+
+
+@pytest.mark.anyio
+async def test_fixture_outlook_without_forecast_uses_difficulty(client, monkeypatch):
+    monkeypatch.delenv("FORECAST_CSV", raising=False)
+    outlook = await call(client, "fixture_outlook", {"gameweeks": 3})
+    assert len(outlook["teams"]) == 20
+    assert outlook["forecast_gameweeks"] is None
+    assert "FPL difficulty only" in outlook["forecast_note"]
+    team = outlook["teams"][0]
+    assert team["expected_gf"] is None
+    assert team["fixtures"] == []
+    assert len(team["opponents"]) == team["fixture_count"]
+    difficulty = [t["average_difficulty"] for t in outlook["teams"]]
+    assert difficulty == sorted(difficulty)
+
+
+@pytest.mark.anyio
+async def test_fixture_outlook_joins_the_forecast(client, monkeypatch, tmp_path):
+    monkeypatch.delenv("FORECAST_CSV", raising=False)
+    plain = await call(client, "fixture_outlook", {"gameweeks": 1, "team": "ARS"})
+    fixture = plain["teams"][0]["fixtures"][0]
+    ids = {}
+    with server.connect() as conn:
+        for row in conn.execute(
+            "select team_short_name, team_id from marts.dim_team where season = %s",
+            (plain["season"],),
+        ):
+            ids[row["team_short_name"]] = row["team_id"]
+    forecast = tmp_path / "fixture_forecast.csv"
+    forecast.write_text(
+        "gameweek,team_id,opponent_id,home,expected_gf,expected_ga\n"
+        f"{fixture['gameweek']},{ids['ARS']},{ids[fixture['opponent']]},"
+        f"{fixture['home']},1.8,0.5\n"
+    )
+    monkeypatch.setenv("FORECAST_CSV", str(forecast))
+
+    joined = await call(client, "fixture_outlook", {"gameweeks": 1, "team": "ARS"})
+    team = joined["teams"][0]
+    first = team["fixtures"][0]
+    assert (first["expected_gf"], first["expected_ga"]) == (1.8, 0.5)
+    assert first["clean_sheet_probability"] == round(math.exp(-0.5), 2)
+    assert team["expected_gf"] == 1.8
+    assert team["fixtures_without_forecast"] == team["fixture_count"] - 1
+    assert (
+        joined["forecast_gameweeks"] == f"{fixture['gameweek']}-{fixture['gameweek']}"
+    )
+
+
+@pytest.mark.anyio
+async def test_fixture_outlook_unknown_team_lists_the_teams(client):
+    result = await client.call_tool("fixture_outlook", {"team": "XYZ"})
+    assert result.is_error is True
+    assert "Teams: ARS" in result.content[0].text
 
 
 def test_server_connects_as_mcp_reader():

@@ -156,3 +156,42 @@ from raw.pipeline_runs
 group by step
 order by step
 """
+
+GAMEWEEK_RANGE_SQL = """
+select
+    min(gameweek_id) filter (where deadline_time > now()) as next_gameweek,
+    max(gameweek_id) as last_gameweek
+from marts.dim_gameweek
+where season = %(season)s
+"""
+
+TEAMS_SQL = """
+select team_id, team_short_name as team
+from marts.dim_team
+where season = %(season)s
+order by team_short_name
+"""
+
+OUTLOOK_SQL = """
+select
+    f.gameweek_id as gameweek,
+    f.kickoff_time,
+    t.team_id,
+    o.team_id as opponent_id,
+    o.team_short_name as opponent,
+    side.home,
+    side.difficulty
+from marts.dim_fixture as f
+cross join lateral (
+    values
+        (f.home_team_name, f.away_team_name, true, f.difficulty_for_home_team),
+        (f.away_team_name, f.home_team_name, false, f.difficulty_for_away_team)
+) as side (team_name, opponent_name, home, difficulty)
+inner join marts.dim_team as t
+    on t.season = f.season and t.team_name = side.team_name
+inner join marts.dim_team as o
+    on o.season = f.season and o.team_name = side.opponent_name
+where f.season = %(season)s
+    and f.gameweek_id between %(from_gameweek)s and %(to_gameweek)s
+order by f.kickoff_time
+"""

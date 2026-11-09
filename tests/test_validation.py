@@ -75,6 +75,10 @@ GUARDRAILS = [
         "less than or equal to 10",
     ),
     ("player_season", {"player_key": "Haaland"}, "player_key", "should match pattern"),
+    ("fixture_outlook", {"gameweeks": 0}, "gameweeks", "greater than or equal to 1"),
+    ("fixture_outlook", {"gameweeks": 9}, "gameweeks", "less than or equal to 8"),
+    ("fixture_outlook", {"team": "Arsenal"}, "team", "should match pattern"),
+    ("fixture_outlook", {"sort_by": "goals"}, "sort_by", "Input should be 'attack'"),
 ]
 
 
@@ -102,9 +106,10 @@ async def test_bad_argument_is_rejected(client, tool, args, field, reason):
 
 
 @pytest.mark.anyio
-async def test_tools_list_is_the_four_read_only_tools(client):
+async def test_tools_list_is_the_five_read_only_tools(client):
     tools = (await client.list_tools()).tools
     assert sorted(t.name for t in tools) == [
+        "fixture_outlook",
         "player_form",
         "player_season",
         "search_players",
