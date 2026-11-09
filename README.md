@@ -1,5 +1,6 @@
 # FPL Data Pipeline
 A daily ELT pipeline for Fantasy Premier League (FPL) data. Python extracts the FPL API, PostgreSQL stores the raw JSON, dbt builds a tested star schema, Airflow runs it every day, and Metabase and Tableau show the results.
+A read-only MCP server lets an AI agent such as Claude Code answer FPL questions with the warehouse's numbers, through 4 fixed tools and a database role that can't write.
 
 **Stack:** Python, PostgreSQL, dbt Core, Apache Airflow, Metabase, Tableau, Google Sheets API, Docker. 
 
@@ -15,6 +16,7 @@ A daily ELT pipeline for Fantasy Premier League (FPL) data. Python extracts the 
 - dbt builds 5 dimensions and 1 fact table (one row per player per fixture), plus 4 analysis tables.
 - A script builds two Metabase dashboards: **FPL scouting** (season to date) and **FPL form** (each player's last N games, default 5).
 - After the tests pass, it writes the current season's scouting tables to a Google Sheet. Tableau re-reads the sheet every day for two public dashboards: **Season** and **Form**.
+- A read-only MCP server lets Claude Code answer FPL questions from the warehouse. See [Ask the warehouse (MCP)](#ask-the-warehouse-mcp).
 
 ## Pipeline
 
@@ -171,16 +173,75 @@ This project requires Docker, [uv](https://docs.astral.sh/uv/) and git.
 - Notebooks: `uv run jupyter lab notebooks/`.
 - The export overwrites both tabs of the Google Sheet every day, so don't edit the sheet by hand. For a refresh sooner than Tableau Public's daily one, click **Request Update** on the viz page.
 
+## Ask the warehouse (MCP)
+
+`mcp_server/` is a small read-only [MCP](https://modelcontextprotocol.io) server over the `marts` schema. Connect it to any ai agents (e.g. Claude Code) and ask FPL questions in plain English, for example "best midfielders under £7m over the last 5 games". The model answers with the warehouse's numbers, not with what it remembers.
+
+```mermaid
+flowchart LR
+    user([You]) --> host[Claude Code<br/>host]
+    host --> client[MCP client]
+    client -- stdio --> server[mcp_server<br/>Python, mcp SDK]
+    server -- SQL as mcp_reader --> marts[(Postgres<br/>marts schema)]
+    server -. 4 columns .-> runs[(raw.pipeline_runs)]
+```
+
+Claude Code starts the server as a child process and talks to it over stdin and stdout. Nothing listens on a port.
+
+| Kind | Name | What it does |
+| --- | --- | --- |
+| Tool | `search_players` | Finds players by part of their name, ignoring case and accents, and returns their `player_key` |
+| Tool | `top_players` | Ranks one position by one stat, with an optional price limit, for the season or the last N games |
+| Tool | `player_form` | One player's last N games, game by game, plus totals |
+| Tool | `player_season` | One player's season totals and per-90 rates |
+| Resource | `fpl://schema` | The tables behind the tools, their columns, and a glossary of the stats |
+| Resource | `fpl://freshness` | The latest finished gameweek and the last successful run of each pipeline step |
+| Prompt | `scout_position` | Finds the best players in a position under a budget, by season and last 5 games |
+| Prompt | `transfer_check` | Compares the player you want to sell with the player you want to buy |
+
+Every tool result says which gameweek the data runs to (`data_to_gameweek`).
+
+### Setup
+
+1. The role `mcp_reader` is created by `sql/init/04_create_mcp_reader.sql` when the warehouse starts on an empty volume. Its password is `MCP_READER_PASSWORD` in `.env`. If your warehouse already existed before this file was added, run it once:
+
+   ```bash
+   docker compose up -d warehouse
+   docker compose exec -T warehouse sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' < sql/init/04_create_mcp_reader.sql
+   ```
+
+2. Register the server with Claude Code. Use the absolute path to your clone:
+
+   ```bash
+   claude mcp add fpl -- uv run --directory /absolute/path/to/fpl-data-pipeline python -m mcp_server.server
+   ```
+
+3. Start Claude Code and run `/mcp`. `fpl` must show as connected, with 4 tools.
+
+To look at the raw requests and results without a model, use the MCP Inspector: `npx @modelcontextprotocol/inspector uv run python -m mcp_server.server`.
+
+
+### Tests
+
+```bash
+uv run pytest
+```
+
+- `tests/test_validation.py` needs no database. It checks that each bad argument is rejected with a readable reason before any query runs, and that the server lists exactly 4 read-only tools.
+- `tests/test_integration.py` needs the running warehouse and is skipped if it can't connect. It calls each tool, checks the row caps, and checks that `mcp_reader` can't insert and that a 5-second query is cancelled.
+
 ## Project layout
 ```
 fpl-data-pipeline/
 ├── airflow/                  # Dockerfile and the DAG (dags/fpl_daily.py)
 ├── dbt/                      # dbt project with its own uv environment: staging, marts, tests
 ├── images/                   # README screenshots
+├── mcp_server/               # read-only MCP server: tools, resources, prompts
 ├── metabase/                 # provision.py: the dashboards as code
 ├── notebooks/                # API exploration and the top-players analysis
 ├── scripts/                  # extract, load and Google Sheets export scripts, run log
 ├── secrets/                  # Google service account key (git-ignored, optional)
-└── sql/                      # schemas, raw tables and the read-only Metabase role
+├── sql/                      # schemas, raw tables and the read-only Metabase and MCP roles
+└── tests/                    # pytest tests for the MCP server
 ```
 
