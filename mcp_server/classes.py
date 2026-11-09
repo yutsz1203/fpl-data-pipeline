@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +57,7 @@ class Game(BaseModel):
     kickoff_time: datetime
     opponent: str
     home: bool
+    started: bool
     minutes: int
     points: int
     goals: int
@@ -67,9 +68,12 @@ class Game(BaseModel):
 
 class WindowTotals(BaseModel):
     games: int
+    starts: int
     minutes: int
     total_points: int
     points_per_million: float
+    goals_scored: int
+    assists: int
     gi: int
     xgi: float
     xgi_per_90: float | None
@@ -124,3 +128,17 @@ class PlayerSeasonResult(BaseModel):
     defcon_per_90: float | None
     defcon_hit_rate: float | None
     saves: int
+
+
+class StepFreshness(BaseModel):
+    step: str
+    last_success_run_date: date | None
+    last_success_at: datetime | None
+
+
+class Freshness(BaseModel):
+    season: str | None
+    data_to_gameweek: int | None = Field(
+        description="Latest gameweek that is finished and data-checked."
+    )
+    steps: list[StepFreshness]

@@ -61,6 +61,7 @@ select
     x.kickoff_time,
     opp.team_short_name as opponent,
     f.was_home as home,
+    f.starts > 0 as started,
     f.minutes,
     f.total_points as points,
     f.goals_scored as goals,
@@ -84,9 +85,12 @@ select
     position,
     price,
     last_n as games,
+    starts,
     minutes,
     total_points,
     points_per_million,
+    goals_scored,
+    assists,
     gi,
     xgi,
     xgi_per_90,
@@ -133,4 +137,22 @@ from marts.player_season_stats as s
 inner join marts.player_scouting as sc
     on sc.player_key = s.player_key
 where s.player_key = %(player_key)s
+"""
+
+SCHEMA_SQL = """
+select table_name, column_name, data_type
+from information_schema.columns
+where table_schema = 'marts'
+    and table_name = any(%(tables)s)
+order by table_name, ordinal_position
+"""
+
+FRESHNESS_SQL = """
+select
+    step,
+    max(run_date) filter (where status = 'success') as last_success_run_date,
+    max(finished_at) filter (where status = 'success') as last_success_at
+from raw.pipeline_runs
+group by step
+order by step
 """

@@ -1,32 +1,53 @@
 import os
+from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 import psycopg
 from dotenv import load_dotenv
 from mcp.server import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 from psycopg import sql
 from psycopg.rows import dict_row
-from pydantic import Field, StringConstraints
+from pydantic import Field
 
 from mcp_server.classes import (
+    Freshness,
     Game,
     Player,
     PlayerFormResult,
     PlayerSeasonResult,
     RankedPlayer,
     SearchResult,
+    StepFreshness,
     TopPlayersResult,
     WindowTotals,
 )
+from mcp_server.constants import (
+    FORM_CAP,
+    GLOSSARY,
+    MAX_PRICE,
+    METRICS,
+    MIN_PRICE,
+    READ_ONLY,
+    SCHEMA_TABLES,
+    SEARCH_CAP,
+    TOP_CAP,
+    Metric,
+    PlayerKey,
+    PlayerName,
+    Position,
+    Season,
+)
+from mcp_server.prompts import scout_position, transfer_check
 from mcp_server.queries import (
     FIND_PLAYER_SQL,
     FORM_GAMES_SQL,
     FORM_TOTALS_SQL,
+    FRESHNESS_SQL,
+    SCHEMA_SQL,
     SEARCH_SQL,
     SEASON_SQL,
     SEASONS_SQL,
@@ -35,50 +56,6 @@ from mcp_server.queries import (
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-SEARCH_CAP = 10
-TOP_CAP = 25
-FORM_CAP = 10
-READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
-
-Season = Annotated[
-    str | None,
-    Field(
-        pattern=r"^\d{4}/\d{2}$",
-        description="Season in the form '2026/27'. Leave it out for the latest season.",
-    ),
-]
-PlayerKey = Annotated[
-    str,
-    Field(
-        pattern=r"^[0-9a-f]{32}$",
-        description="The player's player_key from search_players. Not a name.",
-    ),
-]
-Position = Literal["GKP", "DEF", "MID", "FWD"]
-Metric = Literal[
-    "total_points",
-    "points_per_million",
-    "xgi",
-    "xgi_per_90",
-    "gi",
-    "clean_sheets",
-    "xgc_per_90",
-    "defcon_per_90",
-    "defcon_hit_rate",
-    "saves",
-]
-METRICS = {
-    "total_points": ("total_points", "desc"),
-    "points_per_million": ("points_per_million", "desc"),
-    "xgi": ("xgi", "desc"),
-    "xgi_per_90": ("xgi_per_90", "desc"),
-    "gi": ("gi", "desc"),
-    "clean_sheets": ("clean_sheets", "desc"),
-    "xgc_per_90": ("xgc_per_90", "asc"),
-    "defcon_per_90": ("defcon_per_90", "desc"),
-    "defcon_hit_rate": ("defcon_hit_rate", "desc"),
-    "saves": ("saves", "desc"),
-}
 
 mcp = MCPServer(
     "fpl-warehouse",
@@ -143,13 +120,7 @@ def like_pattern(text: str) -> str:
 
 @mcp.tool(annotations=READ_ONLY)
 def search_players(
-    name: Annotated[
-        str,
-        StringConstraints(strip_whitespace=True, min_length=2, max_length=40),
-        Field(
-            description="All or part of the player's name, for example 'Haaland' or 'Erling'."
-        ),
-    ],
+    name: PlayerName,
     season: Season = None,
 ) -> SearchResult:
     """Find players by name and get their player_key.
@@ -193,8 +164,8 @@ def top_players(
     max_price: Annotated[
         float | None,
         Field(
-            ge=3.5,
-            le=20.0,
+            ge=MIN_PRICE,
+            le=MAX_PRICE,
             description="Only players at or under this price in £m, for example 7.0.",
         ),
     ] = None,
@@ -330,6 +301,50 @@ def player_season(player_key: PlayerKey) -> PlayerSeasonResult:
     if row is None:
         raise ToolError(f"{player['web_name']} has no games in {player['season']} yet.")
     return PlayerSeasonResult(data_to_gameweek=current["data_to_gameweek"], **row)
+
+
+@mcp.resource("fpl://schema", mime_type="text/markdown", title="Warehouse schema")
+def schema() -> str:
+    """The warehouse tables behind the tools, their columns and types, and a glossary of the stats."""
+    with open_cursor() as cur:
+        rows = cur.execute(SCHEMA_SQL, {"tables": list(SCHEMA_TABLES)}).fetchall()
+    columns = defaultdict(list)
+    for row in rows:
+        columns[row["table_name"]].append(row)
+    lines = [
+        "# FPL warehouse",
+        "",
+        "The tools read these tables in the `marts` schema. There is no SQL access: ask through the tools.",
+    ]
+    for table, about in SCHEMA_TABLES.items():
+        if not columns[table]:
+            raise ResourceError(f"Table marts.{table} is missing or not readable.")
+        lines += ["", f"## {table}", "", about, "", "| column | type |", "|---|---|"]
+        lines += [f"| {c['column_name']} | {c['data_type']} |" for c in columns[table]]
+    lines += ["", "## Glossary", ""]
+    lines += [f"- **{term}**: {meaning}" for term, meaning in GLOSSARY.items()]
+    return "\n".join(lines) + "\n"
+
+
+@mcp.resource("fpl://freshness", mime_type="application/json", title="Data freshness")
+def freshness() -> Freshness:
+    """How fresh the data is: the latest finished and data-checked gameweek, and the
+    last successful run of each pipeline step. The player steps run only after a new
+    gameweek finishes, so their dates can be days older than the other steps.
+    """
+    with open_cursor() as cur:
+        seasons = cur.execute(SEASONS_SQL).fetchall()
+        steps = cur.execute(FRESHNESS_SQL).fetchall()
+    latest = seasons[0] if seasons else {"season": None, "data_to_gameweek": None}
+    return Freshness(
+        season=latest["season"],
+        data_to_gameweek=latest["data_to_gameweek"],
+        steps=[StepFreshness(**row) for row in steps],
+    )
+
+
+mcp.prompt(title="Scout a position")(scout_position)
+mcp.prompt(title="Check a transfer")(transfer_check)
 
 
 if __name__ == "__main__":
