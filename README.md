@@ -177,7 +177,7 @@ This project requires Docker, [uv](https://docs.astral.sh/uv/) and git.
    3. Set `GOOGLE_SHEET_ID` in `.env` to the part of the sheet's URL between `/d/` and `/edit`, then run `docker compose up -d`.
    4. In Tableau Public, connect to the sheet through Google Drive. Add your Google account under saved credentials in your Tableau Public settings, then publish with "Keep my data in sync".
 
-6. Optional: lineups and injuries. Get a token at [sports.bzzoiro.com](https://sports.bzzoiro.com), set `BZZOIRO_TOKEN` in `.env`, then run `docker compose up -d`. If your warehouse already existed before the Bzzoiro tables were added, create them once:
+6. Optional: lineups and injuries. Get a token at [sports.bzzoiro.com](https://sports.bzzoiro.com), set `BZZOIRO_TOKEN` in `.env`, then run `docker compose up -d`. dbt reads the Bzzoiro tables even without a token. So if your warehouse already existed before these tables were added, create them once, token or not:
 
    ```bash
    docker compose exec -T warehouse sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' < sql/init/05_create_bzzoiro_tables.sql

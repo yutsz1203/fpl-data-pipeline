@@ -5,6 +5,7 @@ with next_fixture as (
         min(kickoff_time) as kickoff_time
     from {{ ref('fct_lineup') }}
     where lineup_status = 'predicted'
+        and kickoff_time > now()
         and season = (select max(season) from {{ ref('fct_lineup') }})
     group by team
 

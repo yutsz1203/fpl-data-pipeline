@@ -31,9 +31,9 @@ def get_events(session: requests.Session, season_id: int) -> list[dict]:
             f"&limit={PAGE_SIZE}&offset={offset}",
         )
         events += page["results"]
-        if not page["next"]:
+        if not page["next"] or not page["results"]:
             return events
-        offset += PAGE_SIZE
+        offset += len(page["results"])
 
 
 def confirmed_lineups(conn: psycopg.Connection) -> set[int]:

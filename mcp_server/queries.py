@@ -490,6 +490,7 @@ LINEUP_FIXTURES_SQL = """
     select distinct fixture_key, kickoff_time, lineup_status
     from marts.fct_lineup
     where season = %(season)s and team = %(team)s and lineup_status = 'predicted'
+        and kickoff_time > now()
     order by kickoff_time
     limit 1
 )
