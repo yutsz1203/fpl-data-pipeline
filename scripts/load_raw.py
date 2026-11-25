@@ -1,4 +1,5 @@
 import argparse
+import json
 from datetime import date
 
 import psycopg
@@ -22,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source",
         required=True,
-        choices=[*SNAPSHOT_FILES, "players"],
+        choices=[*SNAPSHOT_FILES, "players", "bzzoiro"],
         help="Provide a source.",
     )
 
@@ -76,6 +77,53 @@ def load_players(conn: psycopg.Connection, run_date: date) -> int:
     return inserted
 
 
+def upsert_by_event(conn: psycopg.Connection, table: str, rows: list[tuple]) -> int:
+    with conn.cursor() as cur:
+        cur.executemany(
+            sql.SQL(
+                "INSERT INTO {} (event_id, run_date, payload) VALUES (%s, %s, %s::jsonb) "
+                "ON CONFLICT (event_id) DO UPDATE SET run_date = excluded.run_date, "
+                "payload = excluded.payload, loaded_at = now()"
+            ).format(sql.Identifier("raw", table)),
+            rows,
+        )
+        return cur.rowcount
+
+
+def load_bzzoiro(conn: psycopg.Connection, run_date: date) -> int:
+    source_dir = DATA_DIR / str(run_date) / "bzzoiro"
+    try:
+        events = json.loads((source_dir / "events.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(
+            f"{source_dir}/events.json not found. Run extract_bzzoiro first."
+        )
+    event_rows = [(e["id"], run_date, json.dumps(e)) for e in events]
+    lineup_rows = [
+        (int(p.stem), run_date, p.read_text(encoding="utf-8"))
+        for p in sorted((source_dir / "lineups").glob("*.json"))
+    ]
+    squad_rows = [
+        (int(p.stem), run_date, p.read_text(encoding="utf-8"))
+        for p in sorted((source_dir / "squads").glob("*.json"))
+    ]
+    with conn.transaction():
+        loaded = upsert_by_event(conn, "bzzoiro_events", event_rows)
+        loaded += upsert_by_event(conn, "bzzoiro_lineups", lineup_rows)
+        conn.execute("DELETE FROM raw.bzzoiro_squads WHERE run_date = %s", (run_date,))
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO raw.bzzoiro_squads (team_id, run_date, payload) "
+                "VALUES (%s, %s, %s::jsonb)",
+                squad_rows,
+            )
+            loaded += cur.rowcount
+    print(
+        f"events={len(event_rows)}, lineups={len(lineup_rows)}, squads={len(squad_rows)}"
+    )
+    return loaded
+
+
 def main():
     args = parse_args()
     with (
@@ -84,6 +132,8 @@ def main():
     ):
         if args.source == "players":
             run.rows_loaded = load_players(conn, args.run_date)
+        elif args.source == "bzzoiro":
+            run.rows_loaded = load_bzzoiro(conn, args.run_date)
         else:
             run.rows_loaded = load_snapshot(conn, args.source, args.run_date)
 

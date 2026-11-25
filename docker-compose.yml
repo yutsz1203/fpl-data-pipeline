@@ -94,6 +94,7 @@ services:
     environment:
       <<: *airflow-env
       GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID:-}
+      BZZOIRO_TOKEN: ${BZZOIRO_TOKEN:-}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
