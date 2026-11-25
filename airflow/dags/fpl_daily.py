@@ -4,6 +4,7 @@ from pathlib import Path
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.operators.python import ShortCircuitOperator
 from airflow.sdk import DAG, CronTriggerTimetable, TriggerRule
 
@@ -90,6 +91,9 @@ with DAG(
     load_players = fpl_script("load_players", "load_raw.py --source players")
     extract_bzzoiro = optional_script("extract_bzzoiro", "extract_bzzoiro.py")
     load_bzzoiro = optional_script("load_bzzoiro", "load_raw.py --source bzzoiro")
+    bzzoiro_done = EmptyOperator(
+        task_id="bzzoiro_done", trigger_rule=TriggerRule.ALL_DONE
+    )
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=".venv/bin/dbt run",
@@ -114,4 +118,4 @@ with DAG(
         >> dbt_test
         >> export_sheets
     )
-    extract_bzzoiro >> load_bzzoiro >> dbt_run
+    extract_bzzoiro >> load_bzzoiro >> bzzoiro_done >> dbt_run
