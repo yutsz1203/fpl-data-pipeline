@@ -4,6 +4,7 @@ from pathlib import Path
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.standard.operators.python import ShortCircuitOperator
 from airflow.sdk import DAG, CronTriggerTimetable, TriggerRule
 
@@ -11,12 +12,17 @@ FPL_HOME = "/opt/fpl"
 RUN_DATE = "{{ dag_run.run_after | ds }}"
 
 
-def fpl_script(task_id, command):
+def fpl_script(task_id, command, **kwargs):
     return BashOperator(
         task_id=task_id,
         bash_command=f".venv/bin/python scripts/{command} --run-date {RUN_DATE}",
         cwd=FPL_HOME,
+        **kwargs,
     )
+
+
+def optional_script(task_id, command):
+    return fpl_script(task_id, command, skip_on_exit_code=99, retries=0)
 
 
 def last_checked_deadline(events):
@@ -83,6 +89,11 @@ with DAG(
 
     extract_players = fpl_script("extract_players", "extract_players.py")
     load_players = fpl_script("load_players", "load_raw.py --source players")
+    extract_bzzoiro = optional_script("extract_bzzoiro", "extract_bzzoiro.py")
+    load_bzzoiro = optional_script("load_bzzoiro", "load_raw.py --source bzzoiro")
+    bzzoiro_done = EmptyOperator(
+        task_id="bzzoiro_done", trigger_rule=TriggerRule.ALL_DONE
+    )
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=".venv/bin/dbt run",
@@ -107,3 +118,4 @@ with DAG(
         >> dbt_test
         >> export_sheets
     )
+    extract_bzzoiro >> load_bzzoiro >> bzzoiro_done >> dbt_run

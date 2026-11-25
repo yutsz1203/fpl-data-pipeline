@@ -30,3 +30,11 @@ sources:
                   arguments:
                     to: source('raw', 'master')
                     field: run_date
+      - name: bzzoiro_events
+        description: Bzzoiro Premier League events. One row per event_id, replaced on every load.
+      - name: bzzoiro_lineups
+        description: Bzzoiro lineups (confirmed or predicted). One row per event_id, replaced on every load.
+        config:
+          freshness: null
+      - name: bzzoiro_squads
+        description: Bzzoiro squads with availability. One row per (run_date, team_id).

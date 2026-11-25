@@ -12,5 +12,15 @@ select
     current_selected_pct, 
     penalties_order, 
     direct_freekicks_order,
-    corners_and_indirect_freekicks_order
+    corners_and_indirect_freekicks_order,
+    {{ dbt_utils.generate_surrogate_key(['season', 'team_id']) }} as team_key,
+    {{ dbt_utils.generate_surrogate_key(['season', 'position_id']) }} as position_key,
+    chance_of_playing_next_round,
+    news,
+    news_added,
+    birth_date,
+    transfers_in_gameweek,
+    transfers_out_gameweek,
+    price_change_gameweek,
+    price_change_season
 from {{ ref('stg_players') }}

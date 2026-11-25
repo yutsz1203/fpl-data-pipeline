@@ -16,6 +16,8 @@ with games as (
         f.defensive_contribution as defcon,
         f.defcon_points,
         f.saves,
+        f.bonus,
+        f.bps,
         row_number() over (partition by f.player_key order by x.kickoff_time desc) as last_n,
         count(*) over (partition by f.player_key) as games_played
     from {{ ref('fct_player_match') }} as f
@@ -44,7 +46,9 @@ windows as (
         sum(xgc) over recent as xgc,
         sum(defcon) over recent as defcon,
         count(*) filter (where defcon_points > 0) over recent as defcon_hits,
-        sum(saves) over recent as saves
+        sum(saves) over recent as saves,
+        sum(bonus) over recent as bonus,
+        sum(bps) over recent as bps
     from games
     window recent as (partition by player_key order by last_n rows between unbounded preceding and current row)
 
@@ -76,7 +80,9 @@ select
     round(w.defcon * 90.0 / nullif(w.minutes, 0), 1) as defcon_per_90,
     w.defcon_hits,
     round(w.defcon_hits::numeric / nullif(w.appearances, 0), 2) as defcon_hit_rate,
-    w.saves
+    w.saves,
+    w.bonus,
+    w.bps
 from windows as w
 left join {{ ref('player_scouting') }} as s
     on s.player_key = w.player_key

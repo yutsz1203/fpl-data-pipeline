@@ -213,3 +213,125 @@ models:
       - name: team
         data_tests:
           - not_null
+  - name: fct_player_daily
+    description: One row per player per daily master snapshot. FPL status, news, price, ownership and the gameweek's transfers as they were that day.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [player_key, run_date]
+    columns:
+      - name: player_daily_key
+        data_tests:
+          - unique
+          - not_null
+      - name: status
+        description: "FPL status that day: a (available), d (doubtful), i (injured), s (suspended), u (unavailable), n (not in squad)."
+        data_tests:
+          - not_null
+      - name: next_run_date
+        description: Date of the player's next snapshot. A row describes the player from run_date up to, but not including, this date. Empty in the newest snapshot.
+      - name: price_change
+        description: Price minus the price in the previous snapshot. Empty in a player's first snapshot.
+      - name: availability_changed
+        description: True when status, chance of playing or news differ from the previous snapshot.
+  - name: player_projection
+    description: One row per player per season. Expected minutes and per-90 rates, the inputs the MCP server's projected_points combines with the fixture forecast.
+    data_tests:
+      - dbt_utils.equal_rowcount:
+          arguments:
+            compare_model: ref('dim_player')
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+      - name: availability
+        description: Chance of playing the next gameweek, 0 to 1. FPL's chance_of_playing_next_round when set, else 1 for status a, 0.5 for d and 0 for the rest.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: recent_games
+        description: The player's last 5 team games in which FPL did not list him as unavailable in the newest snapshot on or before the match day. A game before the first snapshot counts only if he played in it.
+      - name: minutes_per_game
+        description: Minutes per game over recent_games, as if the player is available. play_rate and sixty_rate are the shares of those games with any minutes and with 60 or more.
+      - name: expected_minutes
+        description: availability × minutes_per_game, for the next gameweek. Empty if the player has no such game.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 120
+      - name: xg_share
+        description: The player's xG per 90 as a share of his team's xG per game. Rates are pulled toward the position average by 3 games' worth of minutes.
+  - name: bzzoiro_player_map
+    description: One row per FPL player matched to a Bzzoiro player. Same club, then birth date and name.
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_player')
+                field: player_key
+      - name: bzzoiro_player_id
+        data_tests:
+          - unique
+          - not_null
+      - name: match_score
+        description: 3 when birth date and name both match, 2 for birth date only, 1 for name only.
+  - name: fct_lineup
+    description: One row per player per team sheet from Bzzoiro. Confirmed lineups for played fixtures and predicted lineups for the next ones.
+    columns:
+      - name: lineup_key
+        data_tests:
+          - unique
+          - not_null
+      - name: fixture_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_fixture')
+                field: fixture_key
+      - name: player_key
+        description: Empty when the Bzzoiro player has no FPL match, for example a player who left the club.
+      - name: lineup_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [confirmed, predicted]
+      - name: line
+        description: GKP, DEF, MID or FWD as Bzzoiro lists the player in this lineup. It can differ from the FPL position.
+      - name: start_score
+        description: Bzzoiro's 0-1 score for a predicted lineup. Empty for confirmed lineups.
+  - name: player_injury
+    description: One row per FPL player that Bzzoiro lists as injured or suspended in the newest squad snapshot.
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+  - name: next_predicted_lineup
+    description: One row per FPL player in the predicted lineup or bench of the team's next fixture.
+    columns:
+      - name: player_key
+        data_tests:
+          - unique
+          - not_null
+  - name: game_rules
+    description: One row per season. FPL's own scoring table, game settings, chips and squad limits from the newest snapshot, so the rules follow the season without a code change.
+    columns:
+      - name: season
+        data_tests:
+          - unique
+          - not_null
+      - name: scoring
+        data_tests:
+          - not_null
+      - name: chips
+        data_tests:
+          - not_null

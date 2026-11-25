@@ -7,6 +7,9 @@ load_dotenv()
 MASTER_URL = "https://fantasy.premierleague.com/api/bootstrap-static/"
 FIXTURES_URL = "https://fantasy.premierleague.com/api/fixtures/"
 PLAYER_URL = "https://fantasy.premierleague.com/api/element-summary/{id}/"
+BZZOIRO_URL = "https://sports.bzzoiro.com/api/v2/"
+BZZOIRO_LEAGUE_ID = 1
+BZZOIRO_USER_AGENT = "fpl-data-pipeline/0.1"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 
