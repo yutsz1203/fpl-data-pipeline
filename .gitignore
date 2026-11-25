@@ -10,3 +10,4 @@ dbt/dbt_packages/
 airflow/logs
 secrets/
 .ua/
+fpl_decision/
