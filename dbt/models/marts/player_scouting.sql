@@ -41,7 +41,9 @@ select
     s.defcon_per_90,
     s.defcon_hits,
     s.defcon_hit_rate,
-    s.saves
+    s.saves,
+    s.bonus,
+    s.bps
 from {{ ref('player_season_stats') }} as s
 left join {{ ref('dim_player') }} as p
     on p.player_key = s.player_key

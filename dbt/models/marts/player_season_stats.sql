@@ -18,7 +18,9 @@ with season_totals as (
         sum(clean_sheets) as clean_sheets,
         sum(goals_conceded) as goals_conceded,
         sum(expected_goals_conceded) as xgc,
-        sum(saves) as saves
+        sum(saves) as saves,
+        sum(bonus) as bonus,
+        sum(bps) as bps
     from {{ ref('fct_player_match') }}
     group by player_key, season, position_key
 
@@ -50,7 +52,9 @@ select
     s.goals_conceded,
     s.xgc,
     round(s.xgc * 90 / nullif(s.minutes, 0), 2) as xgc_per_90,
-    s.saves
+    s.saves,
+    s.bonus,
+    s.bps
 from season_totals as s
 left join {{ ref('dim_player') }} as p
     on p.player_key = s.player_key

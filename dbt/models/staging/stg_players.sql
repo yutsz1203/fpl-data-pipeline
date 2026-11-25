@@ -12,6 +12,14 @@ select
     (e ->> 'selected_by_percent')::numeric(4,1) as current_selected_pct,
     (e ->> 'penalties_order')::int as penalties_order,
     (e ->> 'direct_freekicks_order')::int as direct_freekicks_order,
-    (e ->> 'corners_and_indirect_freekicks_order')::int as corners_and_indirect_freekicks_order
+    (e ->> 'corners_and_indirect_freekicks_order')::int as corners_and_indirect_freekicks_order,
+    (e ->> 'chance_of_playing_next_round')::int as chance_of_playing_next_round,
+    nullif(e ->> 'news', '') as news,
+    (e ->> 'news_added')::timestamptz as news_added,
+    (e ->> 'birth_date')::date as birth_date,
+    (e ->> 'transfers_in_event')::int as transfers_in_gameweek,
+    (e ->> 'transfers_out_event')::int as transfers_out_gameweek,
+    ((e ->> 'cost_change_event')::numeric/10)::numeric(3,1) as price_change_gameweek,
+    ((e ->> 'cost_change_start')::numeric/10)::numeric(3,1) as price_change_season
 from {{ ref('base_master_latest') }} as b
 cross join lateral jsonb_array_elements(b.payload -> 'elements') as e
