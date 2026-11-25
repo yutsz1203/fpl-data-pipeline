@@ -50,6 +50,7 @@ flowchart LR
 - The gate compares the newest finished gameweek in today's master file with the one at the last player load. Player histories only change after a gameweek, so on other days the player calls are skipped.
 - dbt runs every day either way (trigger rule `none_failed`), so current prices and player status come from today's master file.
 - `export_sheets` exits with code 99 when `GOOGLE_SHEET_ID` is empty, and Airflow marks it skipped. The pipeline works without a Google account.
+- Airflow runs on a laptop that sleeps. While the Mac sleeps, the containers stop but the clock goes on. The Execution API token of a running task is valid for 24 hours (`AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME`, default 10 minutes), so the task continues after the Mac wakes. With the default, every task that was running during a sleep longer than 10 minutes failed with `Invalid auth token`.
 
 ## Data model
 
